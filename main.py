@@ -1,7 +1,7 @@
 import requests
 from dotenv import load_dotenv
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Load environment variables
 load_dotenv()
@@ -22,7 +22,7 @@ def send_telegram(msg):
         print(f"❌ Telegram error: {response.status_code} - {response.text}")
 
 def get_today_fixtures():
-    today = datetime.utcnow().strftime('%Y-%m-%d')
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     url = f"{BASE_URL}/fixtures?date={today}"
     res = requests.get(url, headers=HEADERS)
     if res.status_code != 200:
@@ -42,10 +42,11 @@ def get_home_team_avg_goals(team_id, league_id, season):
         print(f"❌ Stats API error for team {team_id}: {res.text}")
         return 0.0
     try:
-        data = res.json()["response"]
-        return float(data["goals"]["for"]["average"]["home"] or 0)
+        data = res.json().get("response", {})
+        avg_goals = data.get("goals", {}).get("for", {}).get("average", {}).get("home", "0")
+        return float(avg_goals or 0)
     except Exception as e:
-        print(f"❌ Error parsing average goals: {e}")
+        print(f"❌ Error parsing average goals for team {team_id}: {e}")
         return 0.0
 
 def send_daily_home_goal_alert():

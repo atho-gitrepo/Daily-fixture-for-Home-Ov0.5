@@ -2,7 +2,7 @@
 Daily Telegram alert listing football fixtures where the **home team averages more than 1.5 goals per match
 # ⚽ Goal Alert Bot
 
-This project sends a daily Telegram alert listing football fixtures where the **home team averages more than 1.5 goals per match**, using [API-Football](https://rapidapi.com/api-sports/api/api-football).
+This project sends a daily Telegram alert listing football fixtures where the **home team averages more than 1.5 goals per match.
 
 ## 🔧 Features
 
@@ -16,7 +16,7 @@ This project sends a daily Telegram alert listing football fixtures where the **
 ## 📦 Requirements
 
 - Python 3.8+
-- API-Football API Key (via [RapidAPI](https://rapidapi.com/api-sports/api/api-football))
+- API-Football API Key
 - Telegram Bot token and Chat ID
 
 ---

@@ -51,11 +51,25 @@ def fetch_team_avg_goals(team_id, league_id, season):
     try:
         res = requests.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
-        avg_str = res.json().get("response", {}).get("goals", {}).get("for", {}).get("average", {}).get("total")
+        data = res.json()
+
+        # The actual response should be under data["response"]
+        if not isinstance(data, dict):
+            logging.error("Invalid data structure returned (not a dict).")
+            return None
+
+        response = data.get("response")
+        if not isinstance(response, dict):
+            logging.error("Expected 'response' to be a dict but got %s", type(response).__name__)
+            return None
+
+        avg_str = response.get("goals", {}).get("for", {}).get("average", {}).get("total")
         avg_float = float(avg_str) if avg_str not in [None, ""] else None
+
         team_stats_cache[cache_key] = avg_float
         logging.info(f"Team {team_id} average goals: {avg_float}")
         return avg_float
+
     except Exception as e:
         logging.error(f"Error fetching team stats for {team_id}: {e}")
         return None

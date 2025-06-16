@@ -48,22 +48,24 @@ def fetch_team_avg_goals(team_id, league_id, season):
 
     url = f"{API_URL}/teams/statistics?team={team_id}&league={league_id}&season={season}"
     logging.info(f"Fetching average goals for team {team_id} in league {league_id}, season {season}")
+    
     try:
         res = requests.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         data = res.json()
 
-        # The actual response should be under data["response"]
         if not isinstance(data, dict):
-            logging.error("Invalid data structure returned (not a dict).")
+            logging.error("Invalid response format (not a dict)")
             return None
 
-        response = data.get("response")
-        if not isinstance(response, dict):
-            logging.error("Expected 'response' to be a dict but got %s", type(response).__name__)
+        response_data = data.get("response")
+
+        # Check if response_data is valid
+        if not response_data or not isinstance(response_data, dict):
+            logging.error(f"Unexpected 'response' format for team {team_id}: {type(response_data).__name__}")
             return None
 
-        avg_str = response.get("goals", {}).get("for", {}).get("average", {}).get("total")
+        avg_str = response_data.get("goals", {}).get("for", {}).get("average", {}).get("total")
         avg_float = float(avg_str) if avg_str not in [None, ""] else None
 
         team_stats_cache[cache_key] = avg_float

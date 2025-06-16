@@ -29,7 +29,6 @@ def get_today_fixtures():
         print(f"❌ Fixture API error: {res.status_code}")
         return []
     return res.json().get("response", [])
-
 def get_home_team_avg_goals(team_id, league_id, season):
     url = f"{BASE_URL}/teams/statistics"
     params = {
@@ -41,11 +40,18 @@ def get_home_team_avg_goals(team_id, league_id, season):
     if res.status_code != 200:
         print(f"❌ Stats API error for team {team_id}: {res.text}")
         return 0.0
+
     try:
-        data = res.json()["response"]  # This is a dict, not a list for /teams/statistics
-        return float(data["goals"]["for"]["average"]["home"] or 0)
+        response = res.json().get("response")
+        if isinstance(response, list):
+            print(f"⚠️ Unexpected list in response for team {team_id}")
+            return 0.0
+
+        avg_goals = response.get("goals", {}).get("for", {}).get("average", {}).get("home", "0")
+        return float(avg_goals or 0)
+
     except Exception as e:
-        print(f"❌ Error parsing average goals for team {team_id}: {e}")
+        print(f"❌ Data parsing failed for team {team_id}: {e}")
         return 0.0
 
 def send_daily_home_goal_alert():

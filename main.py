@@ -42,11 +42,16 @@ def get_league_standings(league_id, season):
         return []
 
     try:
-        standings = res.json().get("response", [])[0]["league"]["standings"][0]
-        return standings
-    except Exception as e:
-        print(f"❌ Error parsing standings: {e}")
-        return []
+        data = res.json().get("response", [])
+if not data:
+    print(f"⚠️ No standings data for league {league_id} season {season}")
+    return []
+try:
+    standings = data[0]["league"]["standings"][0]
+    return standings
+except (IndexError, KeyError) as e:
+    print(f"❌ Error parsing standings structure: {e}")
+    return []
 
 def send_top_bottom_team_fixtures():
     fixtures = get_today_fixtures()

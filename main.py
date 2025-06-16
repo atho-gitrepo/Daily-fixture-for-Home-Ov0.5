@@ -35,44 +35,17 @@ def get_home_team_avg_goals(team_id, league_id, season):
     params = {
         "team": team_id,
         "league": league_id,
-        "season": str(season)
+        "season": season
     }
-    
-    try:
-        res = requests.get(url, headers=HEADERS, params=params, timeout=10)
-        res.raise_for_status()
-        
-        response_data = res.json().get("response")
-        
-        # Debug print to see actual response structure
-        print(f"Debug - Response for team {team_id}:", response_data)
-        
-        # Handle case where response is a list
-        if isinstance(response_data, list):
-            if len(response_data) > 0:
-                data = response_data[0]  # Take first element if it's a list
-            else:
-                return 0.0
-        else:
-            data = response_data or {}
-        
-        # Multiple ways to find average goals
-        goals_data = data.get("goals", {})
-        
-        # Try different possible paths to home average goals
-        avg_goals = (
-            goals_data.get("for", {}).get("average", {}).get("home") or
-            goals_data.get("for", {}).get("average") or  # Some APIs use this
-            0
-        )
-        
-        return float(avg_goals)
-    
-    except requests.exceptions.RequestException as e:
-        print(f"❌ API request failed for team {team_id}: {str(e)}")
+    res = requests.get(url, headers=HEADERS, params=params)
+    if res.status_code != 200:
+        print(f"❌ Stats API error for team {team_id}: {res.text}")
         return 0.0
-    except (ValueError, AttributeError, TypeError) as e:
-        print(f"❌ Data parsing failed for team {team_id}: {str(e)}")
+    try:
+        data = res.json()["response"]  # This is a dict, not a list for /teams/statistics
+        return float(data["goals"]["for"]["average"]["home"] or 0)
+    except Exception as e:
+        print(f"❌ Error parsing average goals for team {team_id}: {e}")
         return 0.0
 
 def send_daily_home_goal_alert():

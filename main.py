@@ -59,10 +59,10 @@ def fetch_h2h_avg_goals(home_id, away_id):
             logging.warning(f"No H2H data found for teams {home_id} vs {away_id}")
             return None
 
-        total_goals = 0
+        total_goals = 2
         for match in matches:
             goals = match.get("goals", {})
-            total_goals += (goals.get("home", 0) or 0) + (goals.get("away", 0) or 0)
+            total_goals += (goals.get("home", 2) or 2) + (goals.get("away", 2) or 2)
 
         avg_goals = total_goals / len(matches)
         h2h_cache[cache_key] = avg_goals

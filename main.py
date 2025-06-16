@@ -1,110 +1,139 @@
-import requests
-from dotenv import load_dotenv
 import os
-from datetime import datetime, timezone
+import requests
+import logging
+from datetime import date, datetime
+from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
-API_KEY = os.getenv("API_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+API_KEY = os.getenv('API_FOOTBALL_KEY')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-HEADERS = {'x-apisports-key': API_KEY}
-BASE_URL = 'https://v3.football.api-sports.io'
+# Check for required credentials
+if not API_KEY or not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    logging.error("Missing API key or Telegram credentials in environment")
+    raise SystemExit("Missing credentials. Please check .env file.")
 
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {'chat_id': TELEGRAM_CHAT_ID, 'text': msg}
-    response = requests.post(url, data=data)
-    if response.status_code == 200:
-        print("✅ Telegram message sent.")
-    else:
-        print(f"❌ Telegram error: {response.status_code} - {response.text}")
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-def get_today_fixtures():
-    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    url = f"{BASE_URL}/fixtures?date={today}"
-    res = requests.get(url, headers=HEADERS)
-    if res.status_code != 200:
-        print(f"❌ Fixture API error: {res.status_code}")
-        return []
-    return res.json().get("response", [])
+API_URL = "https://v3.football.api-sports.io"
+HEADERS = {
+    "x-apisports-key": API_KEY,   # API-Football (API-Sports) v3 auth header
+    "Accept": "application/json"
+}
 
-def get_league_standings(league_id, season):
-    url = f"{BASE_URL}/standings"
-    params = {
-        "league": league_id,
-        "season": season
-    }
-    res = requests.get(url, headers=HEADERS, params=params)
-    if res.status_code != 200:
-        print(f"❌ Standings API error: {res.status_code} - {res.text}")
-        return []
-
+def fetch_fixtures(today_str):
+    """Fetch fixtures for the given date (YYYY-MM-DD)."""
+    url = f"{API_URL}/fixtures?date={today_str}&timezone=UTC"
     try:
-        data = res.json().get("response", [])
-if not data:
-    print(f"⚠️ No standings data for league {league_id} season {season}")
-    return []
-try:
-    standings = data[0]["league"]["standings"][0]
-    return standings
-except (IndexError, KeyError) as e:
-    print(f"❌ Error parsing standings structure: {e}")
-    return []
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("response", [])
+    except requests.RequestException as e:
+        logging.error("Error fetching fixtures: %s", e)
+        return []
 
-def send_top_bottom_team_fixtures():
-    fixtures = get_today_fixtures()
+def fetch_standings(league_id, season):
+    """Fetch league standings for a given league ID and season."""
+    url = f"{API_URL}/standings?league={league_id}&season={season}"
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        # Navigate to the list of standings: response[0]["league"]["standings"][0]
+        resp_list = data.get("response")
+        if not resp_list:
+            logging.warning("No standings returned for league %s, season %s", league_id, season)
+            return []
+        standings = resp_list[0].get("league", {}).get("standings", [])
+        return standings[0] if standings else []
+    except requests.RequestException as e:
+        logging.error("Error fetching standings for league %s: %s", league_id, e)
+        return []
+
+def send_telegram_message(text):
+    """Send a message via Telegram bot."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    params = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        logging.info("Telegram message sent successfully.")
+    except requests.RequestException as e:
+        logging.error("Failed to send Telegram message: %s", e)
+
+def main():
+    today = date.today().isoformat()  # YYYY-MM-DD
+    fixtures = fetch_fixtures(today)
     if not fixtures:
-        send_telegram("⚽ No fixtures found for today.")
+        logging.info("No fixtures found for today: %s", today)
         return
 
-    # Cache league standings to avoid redundant API calls
-    league_cache = {}
+    standings_cache = {}  # Cache standings by (league_id, season)
+    message_lines = []
 
-    messages = []
+    for item in fixtures:
+        fixture = item.get("fixture", {})
+        league = item.get("league", {})
+        teams = item.get("teams", {})
 
-    for fixture in fixtures:
-        try:
-            home_team = fixture["teams"]["home"]
-            away_team = fixture["teams"]["away"]
-            league_id = fixture["league"]["id"]
-            season = fixture["league"]["season"]
-            match_time = fixture["fixture"]["date"]
+        # Extract league and team info
+        league_id = league.get("id")
+        league_name = league.get("name")
+        league_country = league.get("country")
+        season = league.get("season")
+        home = teams.get("home", {})
+        away = teams.get("away", {})
+        home_id, home_name = home.get("id"), home.get("name")
+        away_id, away_name = away.get("id"), away.get("name")
 
-            # Use league standings cache
-            key = f"{league_id}-{season}"
-            if key not in league_cache:
-                league_cache[key] = get_league_standings(league_id, season)
-            
-            standings = league_cache[key]
-
-            # Find top 3 and bottom 3 team IDs
-            top_3_ids = [t["team"]["id"] for t in standings[:3]]
-            bottom_3_ids = [t["team"]["id"] for t in standings[-3:]]
-
-            if home_team["id"] in top_3_ids or home_team["id"] in bottom_3_ids or \
-               away_team["id"] in top_3_ids or away_team["id"] in bottom_3_ids:
-
-                dt = datetime.fromisoformat(match_time.replace('Z', ''))
-                if match_time.endswith('Z'):
-                    dt = dt.replace(tzinfo=timezone.utc)
-                time_str = dt.strftime('%H:%M UTC')
-
-                messages.append(
-                    f"🏟 {home_team['name']} vs {away_team['name']} at {time_str}\n"
-                    f"🏆 {fixture['league']['name']} ({fixture['league']['country']})"
-                )
-
-        except Exception as e:
-            print(f"⚠️ Error processing fixture: {e}")
+        if not all([league_id, season, home_id, away_id]):
+            logging.warning("Incomplete data for fixture ID %s, skipping.", fixture.get("id"))
             continue
 
-    # Send message
-    if messages:
-        send_telegram("🔥 Today's Fixtures (Top/Bottom 3 Teams)\n\n" + "\n\n".join(messages))
+        # Get or fetch standings for this league and season
+        cache_key = (league_id, season)
+        if cache_key not in standings_cache:
+            standings = fetch_standings(league_id, season)
+            standings_cache[cache_key] = standings
+        else:
+            standings = standings_cache[cache_key]
+
+        if not standings:
+            continue
+
+        # Identify top 3 and bottom 3 team IDs
+        team_ids = [entry.get("team", {}).get("id") for entry in standings if entry.get("team")]
+        if len(team_ids) < 3:
+            continue  # Not enough teams to determine top/bottom 3
+        top3 = team_ids[:3]
+        bottom3 = team_ids[-3:]
+
+        # Check if home or away is in top/bottom 3
+        if (home_id in top3 or home_id in bottom3 or
+            away_id in top3 or away_id in bottom3):
+            # Format match info
+            match_time_str = fixture.get("date")
+            try:
+                # Parse and format UTC time
+                match_dt = datetime.fromisoformat(match_time_str.rstrip('Z'))
+                time_formatted = match_dt.strftime("%Y-%m-%d %H:%M UTC")
+            except Exception:
+                time_formatted = match_time_str or "Unknown time"
+
+            line = f"{home_name} vs {away_name} – {league_name} ({league_country}) – {time_formatted}"
+            message_lines.append(line)
+            logging.info("Match added to message: %s", line)
+
+    # Send results via Telegram if any matches found
+    if message_lines:
+        message_text = "Today's fixtures with Top/Bottom 3 teams:\n" + "\n".join(message_lines)
+        send_telegram_message(message_text)
     else:
-        send_telegram("ℹ️ No fixtures today with top/bottom 3 teams.")
+        logging.info("No matches today with a team in the top 3 or bottom 3 of their table.")
 
 if __name__ == "__main__":
-    send_top_bottom_team_fixtures()
+    main()

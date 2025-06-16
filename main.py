@@ -29,89 +29,77 @@ def get_today_fixtures():
         print(f"❌ Fixture API error: {res.status_code}")
         return []
     return res.json().get("response", [])
-def get_home_team_avg_goals(team_id, league_id, season):
-    url = f"{BASE_URL}/teams/statistics"
+
+def get_league_standings(league_id, season):
+    url = f"{BASE_URL}/standings"
     params = {
-        "team": team_id,
         "league": league_id,
         "season": season
     }
     res = requests.get(url, headers=HEADERS, params=params)
     if res.status_code != 200:
-        print(f"❌ Stats API error for team {team_id}: {res.text}")
-        return 0.0
+        print(f"❌ Standings API error: {res.status_code} - {res.text}")
+        return []
 
     try:
-        response = res.json().get("response")
-        if isinstance(response, list):
-            print(f"⚠️ Unexpected list in response for team {team_id}")
-            return 0.0
-
-        avg_goals = response.get("goals", {}).get("for", {}).get("average", {}).get("home", "0")
-        return float(avg_goals or 0)
-
+        standings = res.json().get("response", [])[0]["league"]["standings"][0]
+        return standings
     except Exception as e:
-        print(f"❌ Data parsing failed for team {team_id}: {e}")
-        return 0.0
+        print(f"❌ Error parsing standings: {e}")
+        return []
 
-def send_daily_home_goal_alert():
-    """Main function to find and alert on high-scoring home teams"""
-    try:
-        fixtures = get_today_fixtures()
-        if not fixtures:
-            send_telegram("⚽ No fixtures found for today.")
-            return
+def send_top_bottom_team_fixtures():
+    fixtures = get_today_fixtures()
+    if not fixtures:
+        send_telegram("⚽ No fixtures found for today.")
+        return
 
-        qualified_matches = []
-        
-        for fixture in fixtures:
-            try:
-                # Extract match data
-                home_team = fixture["teams"]["home"]["name"]
-                away_team = fixture["teams"]["away"]["name"]
-                team_id = fixture["teams"]["home"]["id"]
-                league_id = fixture["league"]["id"]
-                season = fixture["league"]["season"]
-                match_time = fixture["fixture"]["date"]
+    # Cache league standings to avoid redundant API calls
+    league_cache = {}
 
-                # Get average goals
-                avg_goals = get_home_team_avg_goals(team_id, league_id, season)
-                
-                if avg_goals > 1.5:
-                    # Format match time
-                    dt = datetime.fromisoformat(match_time.replace('Z', ''))
-                    if match_time.endswith('Z'):
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    time_str = dt.strftime('%H:%M UTC')
-                    
-                    # Add match info
-                    qualified_matches.append(
-                        f"🏟 {home_team} vs {away_team} at {time_str}\n"
-                        f"⚽ Avg Home Goals: {avg_goals:.2f}\n"
-                        f"🏆 League: {fixture['league']['name']}\n"
-                        f"🔗 Fixture ID: {fixture['fixture']['id']}"
-                    )
-                    
-            except KeyError as e:
-                print(f"⚠ Missing key in fixture data: {e}")
-                continue
-            except Exception as e:
-                print(f"⚠ Error processing fixture: {e}")
-                continue
+    messages = []
 
-        # Send results
-        if qualified_matches:
-            message = ("🔥 Today's Matches (Home Avg Goals > 1.5)\n\n" + 
-                      "\n\n".join(qualified_matches))
-        else:
-            message = "⚽ No matches today with home avg goals > 1.5"
+    for fixture in fixtures:
+        try:
+            home_team = fixture["teams"]["home"]
+            away_team = fixture["teams"]["away"]
+            league_id = fixture["league"]["id"]
+            season = fixture["league"]["season"]
+            match_time = fixture["fixture"]["date"]
+
+            # Use league standings cache
+            key = f"{league_id}-{season}"
+            if key not in league_cache:
+                league_cache[key] = get_league_standings(league_id, season)
             
-        send_telegram(message)
-        
-    except Exception as e:
-        error_msg = f"❌ Critical error in daily alert: {str(e)}"
-        print(error_msg)
-        send_telegram(error_msg)
+            standings = league_cache[key]
+
+            # Find top 3 and bottom 3 team IDs
+            top_3_ids = [t["team"]["id"] for t in standings[:3]]
+            bottom_3_ids = [t["team"]["id"] for t in standings[-3:]]
+
+            if home_team["id"] in top_3_ids or home_team["id"] in bottom_3_ids or \
+               away_team["id"] in top_3_ids or away_team["id"] in bottom_3_ids:
+
+                dt = datetime.fromisoformat(match_time.replace('Z', ''))
+                if match_time.endswith('Z'):
+                    dt = dt.replace(tzinfo=timezone.utc)
+                time_str = dt.strftime('%H:%M UTC')
+
+                messages.append(
+                    f"🏟 {home_team['name']} vs {away_team['name']} at {time_str}\n"
+                    f"🏆 {fixture['league']['name']} ({fixture['league']['country']})"
+                )
+
+        except Exception as e:
+            print(f"⚠️ Error processing fixture: {e}")
+            continue
+
+    # Send message
+    if messages:
+        send_telegram("🔥 Today's Fixtures (Top/Bottom 3 Teams)\n\n" + "\n\n".join(messages))
+    else:
+        send_telegram("ℹ️ No fixtures today with top/bottom 3 teams.")
 
 if __name__ == "__main__":
-    send_daily_home_goal_alert()
+    send_top_bottom_team_fixtures()

@@ -31,49 +31,94 @@ def get_today_fixtures():
     return res.json().get("response", [])
 
 def get_home_team_avg_goals(team_id, league_id, season):
+    """Get average home goals for a team with robust error handling"""
     url = f"{BASE_URL}/teams/statistics"
     params = {
         "team": team_id,
         "league": league_id,
-        "season": season
+        "season": str(season)  # Ensure season is string
     }
-    res = requests.get(url, headers=HEADERS, params=params)
-    if res.status_code != 200:
-        print(f"❌ Stats API error for team {team_id}: {res.text}")
-        return 0.0
+    
     try:
+        res = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        res.raise_for_status()  # Raises exception for 4XX/5XX responses
+        
         data = res.json().get("response", {})
-        avg_goals = data.get("goals", {}).get("for", {}).get("average", {}).get("home", "0")
-        return float(avg_goals or 0)
-    except Exception as e:
-        print(f"❌ Error parsing average goals for team {team_id}: {e}")
+        
+        # Multiple fallback paths to find home average goals
+        avg_goals = (
+            data.get("goals", {}).get("for", {}).get("average", {}).get("home") or
+            data.get("goals", {}).get("for", {}).get("average") or  # Some APIs use this
+            0
+        )
+        
+        return float(avg_goals)
+    
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API request failed for team {team_id}: {str(e)}")
+        return 0.0
+    except (ValueError, AttributeError) as e:
+        print(f"❌ Data parsing failed for team {team_id}: {str(e)}")
         return 0.0
 
 def send_daily_home_goal_alert():
-    fixtures = get_today_fixtures()
-    qualified_matches = []
+    """Main function to find and alert on high-scoring home teams"""
+    try:
+        fixtures = get_today_fixtures()
+        if not fixtures:
+            send_telegram("⚽ No fixtures found for today.")
+            return
 
-    for fixture in fixtures:
-        home_team = fixture["teams"]["home"]["name"]
-        away_team = fixture["teams"]["away"]["name"]
-        team_id = fixture["teams"]["home"]["id"]
-        league_id = fixture["league"]["id"]
-        season = fixture["league"]["season"]
-        match_time = fixture["fixture"]["date"]
+        qualified_matches = []
+        
+        for fixture in fixtures:
+            try:
+                # Extract match data
+                home_team = fixture["teams"]["home"]["name"]
+                away_team = fixture["teams"]["away"]["name"]
+                team_id = fixture["teams"]["home"]["id"]
+                league_id = fixture["league"]["id"]
+                season = fixture["league"]["season"]
+                match_time = fixture["fixture"]["date"]
 
-        avg_goals = get_home_team_avg_goals(team_id, league_id, season)
-        if avg_goals > 1.5:
-            time_utc = datetime.fromisoformat(match_time[:-1]).strftime('%H:%M UTC')
-            qualified_matches.append(
-                f"🏟 {home_team} vs {away_team} at {time_utc}\n⚽ Avg Home Goals: {avg_goals:.2f}"
-            )
+                # Get average goals
+                avg_goals = get_home_team_avg_goals(team_id, league_id, season)
+                
+                if avg_goals > 1.5:
+                    # Format match time
+                    dt = datetime.fromisoformat(match_time.replace('Z', ''))
+                    if match_time.endswith('Z'):
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    time_str = dt.strftime('%H:%M UTC')
+                    
+                    # Add match info
+                    qualified_matches.append(
+                        f"🏟 {home_team} vs {away_team} at {time_str}\n"
+                        f"⚽ Avg Home Goals: {avg_goals:.2f}\n"
+                        f"🏆 League: {fixture['league']['name']}\n"
+                        f"🔗 Fixture ID: {fixture['fixture']['id']}"
+                    )
+                    
+            except KeyError as e:
+                print(f"⚠ Missing key in fixture data: {e}")
+                continue
+            except Exception as e:
+                print(f"⚠ Error processing fixture: {e}")
+                continue
 
-    if qualified_matches:
-        message = "🔥 Today's Matches (Home Avg Goals > 1.5):\n\n" + "\n\n".join(qualified_matches)
-    else:
-        message = "⚽ No matches found today with home avg goals over 1.5."
-
-    send_telegram(message)
+        # Send results
+        if qualified_matches:
+            message = ("🔥 Today's Matches (Home Avg Goals > 1.5)\n\n" + 
+                      "\n\n".join(qualified_matches))
+        else:
+            message = "⚽ No matches today with home avg goals > 1.5"
+            
+        send_telegram(message)
+        
+    except Exception as e:
+        error_msg = f"❌ Critical error in daily alert: {str(e)}"
+        print(error_msg)
+        send_telegram(error_msg)
 
 if __name__ == "__main__":
     send_daily_home_goal_alert()
